@@ -9,7 +9,12 @@ const fetch = require('node-fetch');
 require('dotenv').config();
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['POST'],
+  allowedHeaders: ['Content-Type']
+}));
+
 app.use(express.json());
 const upload = multer({ storage: multer.memoryStorage() });
 
