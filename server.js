@@ -1,4 +1,3 @@
-
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -11,7 +10,7 @@ require('dotenv').config();
 const app = express();
 app.use(cors({
   origin: '*',
-  methods: ['POST'],
+  methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type']
 }));
 
@@ -21,30 +20,40 @@ const upload = multer({ storage: multer.memoryStorage() });
 let documentText = '';
 
 app.post('/summarize', upload.single('file'), async (req, res) => {
-  const file = req.file;
-  if (!file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'No file uploaded' });
 
-  const text = await extractText(file);
-  documentText = text.slice(0, 3000);
+    const text = await extractText(file);
+    documentText = text.slice(0, 3000);
 
-  const summary = await callHuggingFace(`Summarize this:
+    const summary = await callHuggingFace(`Summarize this:
 
 ${documentText}`);
-  res.json({ summary });
+    res.json({ summary });
+  } catch (err) {
+    console.error('Summarize error:', err);
+    res.status(500).json({ error: 'Summarization failed. Please try again.' });
+  }
 });
 
 app.post('/ask', async (req, res) => {
-  const { question } = req.body;
-  if (!question || !documentText) return res.status(400).json({ error: 'Missing question or document context' });
+  try {
+    const { question } = req.body;
+    if (!question || !documentText) return res.status(400).json({ error: 'Missing question or document context' });
 
-  const prompt = `Based on this document:
+    const prompt = `Based on this document:
 
 ${documentText}
 
 Answer the following question:
 ${question}`;
-  const answer = await callHuggingFace(prompt);
-  res.json({ answer });
+    const answer = await callHuggingFace(prompt);
+    res.json({ answer });
+  } catch (err) {
+    console.error('Ask error:', err);
+    res.status(500).json({ error: 'Failed to answer question. Please try again.' });
+  }
 });
 
 async function callHuggingFace(prompt) {
