@@ -1,21 +1,15 @@
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
-const fs = require('fs');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const fetch = require('node-fetch');
 require('dotenv').config();
 
 const app = express();
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type']
-}));
-
-app.use(express.json());
-const upload = multer({ storage: multer.memoryStorage() });
+app.use(cors({ origin: '*', methods: ['POST'], allowedHeaders: ['Content-Type'] }));
+app.use(express.json({ limit: '10mb' })); // for /ask payload
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } }); // 15 MB max
 
 let documentText = '';
 
@@ -25,22 +19,26 @@ app.post('/summarize', upload.single('file'), async (req, res) => {
     if (!file) return res.status(400).json({ error: 'No file uploaded' });
 
     const text = await extractText(file);
-    documentText = text.slice(0, 3000);
-
+    documentText = text.slice(0, 4000); // keep it manageable for HuggingFace
     const summary = await callHuggingFace(`Summarize this:
 
 ${documentText}`);
-    res.json({ summary });
+
+    return res.json({ summary });
   } catch (err) {
-    console.error('Summarize error:', err);
-    res.status(500).json({ error: 'Summarization failed. Please try again.' });
+    console.error('Summarize error:', err.message);
+    res.status(500).json({ error: 'Summarization failed.' });
   }
 });
 
 app.post('/ask', async (req, res) => {
   try {
     const { question } = req.body;
-    if (!question || !documentText) return res.status(400).json({ error: 'Missing question or document context' });
+    console.log('Received question:', question);
+    if (!question || !documentText) {
+      console.warn('Missing data:', { question, doc: !!documentText });
+      return res.status(400).json({ error: 'Missing question or document context' });
+    }
 
     const prompt = `Based on this document:
 
@@ -51,29 +49,10 @@ ${question}`;
     const answer = await callHuggingFace(prompt);
     res.json({ answer });
   } catch (err) {
-    console.error('Ask error:', err);
-    res.status(500).json({ error: 'Failed to answer question. Please try again.' });
+    console.error('Ask error:', err.message);
+    res.status(500).json({ error: 'Failed to answer question.' });
   }
 });
-
-async function callHuggingFace(prompt) {
-  const HF_API_KEY = process.env.HF_API_KEY;
-  const model = 'mistralai/Mistral-7B-Instruct-v0.1';
-
-  const response = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${HF_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ inputs: prompt })
-  });
-
-  const json = await response.json();
-  if (Array.isArray(json)) return json[0]?.generated_text || 'No response.';
-  if (json?.generated_text) return json.generated_text;
-  return JSON.stringify(json);
-}
 
 async function extractText(file) {
   const mime = file.mimetype;
@@ -96,5 +75,24 @@ async function extractText(file) {
   return 'Unsupported file type.';
 }
 
+async function callHuggingFace(prompt) {
+  const HF_API_KEY = process.env.HF_API_KEY;
+  const model = 'mistralai/Mistral-7B-Instruct-v0.1';
+
+  const response = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${HF_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ inputs: prompt })
+  });
+
+  const result = await response.json();
+  if (Array.isArray(result)) return result[0]?.generated_text || 'No answer.';
+  if (result?.generated_text) return result.generated_text;
+  return typeof result === 'object' ? JSON.stringify(result) : 'Unexpected response';
+}
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
